@@ -1,0 +1,41 @@
+[Unit]
+Description=GitHub Self-Hosted Base Runner for {repo_name}
+After=network-online.target
+
+[Container]
+# CUSTOMIZATION: Image URL / Tag for the base runner image built from Containerfile.base
+Image={container_image_url}
+ContainerName=github-runner-base-{repo_name}
+
+# CUSTOMIZATION: Environment Variables
+Environment=GITHUB_REPOSITORY=https://github.com/{owner}/{repo_name}
+Environment=RUNNER_NAME=github-runner-base-{repo_name}
+Environment=RUNNER_LABELS={runner_labels}
+
+# CUSTOMIZATION: Secret Token Injection (stored via `podman secret create github_runner_token_{repo_name} -`)
+Secret=github_runner_token_{repo_name},type=env,target=RUNNER_TOKEN
+
+# Execution Script
+Exec=/entrypoint.sh
+
+# CUSTOMIZATION: Volume Mounts
+# Host directory for workspace persistence
+Volume={host_work_dir}:/home/runner/_work:U,z
+# Named volume or host directory for configuration backup across container recreations
+Volume=github-runner-{repo_name}-config:/home/runner/config:U,z
+
+# CUSTOMIZATION: Optional Device Pass-Through (e.g. for hardware access if required)
+# AddDevice=/dev/bus/usb:/dev/bus/usb
+
+# Permissions & Security
+GroupAdd=keep-groups
+SecurityLabelDisable=true
+RunInit=true
+StopSignal=SIGINT
+StopTimeout=30
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

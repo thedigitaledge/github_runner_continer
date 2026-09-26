@@ -1,0 +1,13 @@
+# Base GitHub Self-Hosted Runner Container
+FROM ghcr.io/actions/actions-runner:latest
+
+# CUSTOMIZATION: Switch to root to copy entrypoint script and set permissions
+USER root
+
+COPY github-runner-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# CUSTOMIZATION: Revert back to non-root runner user (default UID 1001 in actions-runner image)
+USER runner
+
+ENTRYPOINT ["/entrypoint.sh"]
