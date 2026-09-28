@@ -31,7 +31,7 @@ jobs:
           ignore: DL3006,DL3007,DL3008,DL4006,SC1091
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           driver: docker
 
