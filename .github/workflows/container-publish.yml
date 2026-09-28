@@ -1,0 +1,100 @@
+name: Publish Container Images
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'SemVer version tag to publish (e.g., v1.0.0 or 1.0.0)'
+        required: false
+        default: 'v1.0.0'
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine Version and Timestamps
+        id: prep
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW_VERSION="${{ github.event.inputs.version }}"
+          else
+            RAW_VERSION="${{ github.ref_name }}"
+          fi
+
+          VERSION="${RAW_VERSION#v}"
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          IMAGE_PREFIX="${{ env.REGISTRY }}/${{ github.repository_owner }}"
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag_v=v${VERSION}" >> $GITHUB_OUTPUT
+          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+          echo "image_prefix=${IMAGE_PREFIX}" >> $GITHUB_OUTPUT
+
+      # Build & Push Base Runner Image
+      - name: Build and Push Base Runner Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Containerfile.base
+          push: true
+          tags: |
+            ${{ steps.prep.outputs.image_prefix }}/github-runner-base:${{ steps.prep.outputs.version }}
+            ${{ steps.prep.outputs.image_prefix }}/github-runner-base:${{ steps.prep.outputs.tag_v }}
+            ${{ steps.prep.outputs.image_prefix }}/github-runner-base:latest
+          build-args: |
+            IMAGE_TITLE=github-runner-base
+            IMAGE_DESCRIPTION=Base GitHub Self-Hosted Runner Container
+            IMAGE_VERSION=${{ steps.prep.outputs.version }}
+            IMAGE_URL=https://github.com/${{ github.repository }}
+            IMAGE_DOCUMENTATION=https://github.com/${{ github.repository }}/blob/main/README.md
+            IMAGE_CREATED=${{ steps.prep.outputs.build_date }}
+            IMAGE_BASE_NAME=ghcr.io/actions/actions-runner:latest
+            IMAGE_AUTHORS=${{ github.repository_owner }}
+            IMAGE_LICENSES=MIT
+
+      # Build & Push Extended Runner Image with Docker CLI
+      - name: Build and Push Docker CLI Runner Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Containerfile.docker
+          push: true
+          tags: |
+            ${{ steps.prep.outputs.image_prefix }}/github-runner-docker:${{ steps.prep.outputs.version }}
+            ${{ steps.prep.outputs.image_prefix }}/github-runner-docker:${{ steps.prep.outputs.tag_v }}
+            ${{ steps.prep.outputs.image_prefix }}/github-runner-docker:latest
+          build-args: |
+            BASE_IMAGE=${{ steps.prep.outputs.image_prefix }}/github-runner-base:${{ steps.prep.outputs.version }}
+            IMAGE_TITLE=github-runner-docker
+            IMAGE_DESCRIPTION=Extended GitHub Self-Hosted Runner Container with Docker CLI
+            IMAGE_VERSION=${{ steps.prep.outputs.version }}
+            IMAGE_URL=https://github.com/${{ github.repository }}
+            IMAGE_DOCUMENTATION=https://github.com/${{ github.repository }}/blob/main/README.md
+            IMAGE_CREATED=${{ steps.prep.outputs.build_date }}
+            IMAGE_BASE_NAME=${{ steps.prep.outputs.image_prefix }}/github-runner-base:${{ steps.prep.outputs.version }}
+            IMAGE_AUTHORS=${{ github.repository_owner }}
+            IMAGE_LICENSES=MIT

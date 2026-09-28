@@ -1,0 +1,33 @@
+name: Bug Report
+description: Create a report to help us fix bugs in the GitHub runner container setup
+title: "[BUG]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to fill out this bug report!
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Also tell us what you expected to happen.
+      placeholder: Describe the bug...
+    validations:
+      required: true
+  - type: dropdown
+    id: container-type
+    attributes:
+      label: Container Type
+      options:
+        - Base Runner (`github-runner-base`)
+        - Docker CLI Runner (`github-runner-docker`)
+        - Quadlet Systemd Unit
+        - GitHub Actions Workflow
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Log Output
+      description: Copy and paste journalctl or container logs here.
+      render: shell

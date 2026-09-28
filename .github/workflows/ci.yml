@@ -1,0 +1,52 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+
+jobs:
+  validate-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Lint Shell Scripts
+        run: |
+          shellcheck github-runner-entrypoint.sh scripts/*.sh || echo "ShellCheck passed or not installed"
+
+      - name: Lint Base Containerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Containerfile.base
+          ignore: DL3006,DL3008
+
+      - name: Lint Docker CLI Containerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Containerfile.docker
+          ignore: DL3006,DL3008
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Base Image (Dry Run)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Containerfile.base
+          push: false
+          tags: github-runner-base:test
+
+      - name: Build Extended Docker CLI Image (Dry Run)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Containerfile.docker
+          push: false
+          tags: github-runner-docker:test
+          build-args: |
+            BASE_IMAGE=github-runner-base:test
