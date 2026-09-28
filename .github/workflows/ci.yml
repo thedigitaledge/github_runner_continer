@@ -19,13 +19,13 @@ jobs:
           shellcheck github-runner-entrypoint.sh scripts/*.sh || echo "ShellCheck passed or not installed"
 
       - name: Lint Base Containerfile
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: Containerfile.base
           ignore: DL3006,DL3007,DL3008,DL4006,SC1091
 
       - name: Lint Docker CLI Containerfile
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: Containerfile.docker
           ignore: DL3006,DL3007,DL3008,DL4006,SC1091
