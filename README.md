@@ -55,7 +55,7 @@ docker build -f Dockerfile.docker -t github-runner-docker:latest .
 
 You can run the `github-runner-docker` container locally for testing, debugging, or interactive container workflows without attaching or registering the runner with GitHub.
 
-To bypass the default entrypoint script (`/entrypoint.sh`) which performs GitHub runner registration, override the container entrypoint using `--entrypoint /bin/bash` when executing `podman run`.
+When no GitHub registration credentials (`GITHUB_REPOSITORY` or `RUNNER_TOKEN`) are supplied, the entrypoint script automatically runs in local mode and drops into an interactive shell.
 
 ### Interactive Shell with Host Podman Socket
 
@@ -63,7 +63,6 @@ Mount your host Podman socket into the container so the installed `docker` CLI c
 
 ```bash
 podman run --rm -it \
-  --entrypoint /bin/bash \
   -v "${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:z" \
   github-runner-docker:latest
 ```
@@ -76,14 +75,13 @@ podman run --rm -it \
 
 ### Running One-off Commands
 
-You can also execute individual commands directly inside the runner using `--entrypoint`:
+You can also execute individual commands directly inside the runner:
 
 ```bash
 # Check Docker CLI version connected to host Podman socket
 podman run --rm \
-  --entrypoint docker \
   -v "${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:z" \
-  github-runner-docker:latest version
+  github-runner-docker:latest docker version
 ```
 
 ---

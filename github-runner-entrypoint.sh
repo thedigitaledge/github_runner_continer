@@ -1,6 +1,30 @@
 #!/usr/bin/env bash
 set -e
 
+# Grant write access to the mounted socket if it exists
+if [ -S /var/run/docker.sock ]; then
+    chmod 666 /var/run/docker.sock 2>/dev/null || true
+fi
+
+# If command arguments are provided, execute them directly
+if [ "$#" -gt 0 ]; then
+    if command -v gosu >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
+        exec gosu runner "$@"
+    else
+        exec "$@"
+    fi
+fi
+
+# If GitHub credentials are not provided, run an interactive shell or exec command
+if [ -z "${GITHUB_REPOSITORY}" ] || [ -z "${RUNNER_TOKEN}" ]; then
+    echo "No GitHub repository or token supplied. Running in local mode..."
+    if command -v gosu >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
+        exec gosu runner bash
+    else
+        exec bash
+    fi
+fi
+
 cd "${HOME:-/home/runner}"
 
 CONFIG_DIR="${HOME}/config"
