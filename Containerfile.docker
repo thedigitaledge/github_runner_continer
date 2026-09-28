@@ -1,6 +1,6 @@
 # Extended GitHub Self-Hosted Runner Container with Docker CLI
-# CUSTOMIZATION: Change github-runner-base:latest to your base image tag or registry URL if needed
-FROM github-runner-base:latest
+ARG BASE_IMAGE=github-runner-base:latest
+FROM ${BASE_IMAGE}
 
 # CUSTOMIZATION: Switch to root to install packages and configure dependencies
 USER root
