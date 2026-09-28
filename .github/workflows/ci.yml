@@ -36,7 +36,7 @@ jobs:
           driver: docker
 
       - name: Build Base Image (Dry Run)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Containerfile.base
@@ -45,7 +45,7 @@ jobs:
           tags: github-runner-base:test
 
       - name: Build Extended Docker CLI Image (Dry Run)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Containerfile.docker
