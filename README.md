@@ -51,6 +51,43 @@ docker build -f Dockerfile.docker -t github-runner-docker:latest .
 
 ---
 
+## Running Locally Without Attaching to GitHub
+
+You can run the `github-runner-docker` container locally for testing, debugging, or interactive container workflows without attaching or registering the runner with GitHub.
+
+To bypass the default entrypoint script (`/entrypoint.sh`) which performs GitHub runner registration, override the container entrypoint using `--entrypoint /bin/bash` when executing `podman run`.
+
+### Interactive Shell with Host Podman Socket
+
+Mount your host Podman socket into the container so the installed `docker` CLI can communicate with your host container engine:
+
+```bash
+podman run --rm -it \
+  --entrypoint /bin/bash \
+  -v "${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:z" \
+  github-runner-docker:latest
+```
+
+> **Note on Podman Socket:**
+> Ensure the Podman socket service is enabled and active on your host system:
+> ```bash
+> systemctl --user enable --now podman.socket
+> ```
+
+### Running One-off Commands
+
+You can also execute individual commands directly inside the runner using `--entrypoint`:
+
+```bash
+# Check Docker CLI version connected to host Podman socket
+podman run --rm \
+  --entrypoint docker \
+  -v "${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:z" \
+  github-runner-docker:latest version
+```
+
+---
+
 ## Quadlet Unit Deployment & Customization
 
 Podman Quadlet systemd service files allow rootless user-level execution of containers managed directly by `systemd`.
