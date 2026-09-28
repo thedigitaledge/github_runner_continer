@@ -38,6 +38,7 @@ jobs:
         with:
           context: .
           file: Containerfile.base
+          load: true
           push: false
           tags: github-runner-base:test
 
@@ -46,6 +47,7 @@ jobs:
         with:
           context: .
           file: Containerfile.docker
+          load: true
           push: false
           tags: github-runner-docker:test
           build-args: |
