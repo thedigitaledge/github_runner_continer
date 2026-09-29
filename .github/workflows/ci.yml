@@ -47,19 +47,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
       - name: Build Base Image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Containerfile.base
-          load: true
-          push: false
-          tags: github-runner-base:test
-          cache-from: type=gha,scope=base
-          cache-to: type=gha,mode=max,scope=base
+        run: |
+          docker build \
+            -f Containerfile.base \
+            -t github-runner-base:test \
+            .
 
       - name: Build Extended Docker CLI Image
         run: |
@@ -111,7 +104,11 @@ jobs:
         run: |
           docker load -i artifacts/github-runner-docker.tar
           echo "Testing container execution on Ubuntu Docker..."
-          CONTAINER_ID=$(docker run -d -v /var/run/docker.sock:/var/run/docker.sock github-runner-docker:test)
+          DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 0)
+          CONTAINER_ID=$(docker run -d \
+            --group-add "${DOCKER_GID}" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            github-runner-docker:test)
           sleep 3
 
           if docker ps -q --filter "id=${CONTAINER_ID}" | grep -q .; then
