@@ -51,37 +51,87 @@ docker build -f Dockerfile.docker -t github-runner-docker:latest .
 
 ---
 
-## Running Locally Without Attaching to GitHub
+## Running the Container
 
-You can run the `github-runner-docker` container locally for testing, debugging, or interactive container workflows without attaching or registering the runner with GitHub.
+You can run the runner container on **Ubuntu** (using Docker or Podman) or **Fedora Silverblue** (using Rootless Podman).
 
-When no GitHub registration credentials (`GITHUB_REPOSITORY` or `RUNNER_TOKEN`) are supplied, the entrypoint script automatically runs in local mode and drops into an interactive shell.
+### 1. Running on Ubuntu
 
-### Interactive Shell with Host Podman Socket
+#### Using Docker
 
-Mount your host Podman socket into the container so the installed `docker` CLI can communicate with your host container engine:
+**Interactive / Local Execution (without GitHub attachment):**
+Pass the host Docker group GID so the non-root `runner` user inside the container inherits permissions to communicate with the Docker daemon:
+```bash
+DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 0)
 
+docker run --rm -it \
+  --group-add "${DOCKER_GID}" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  github-runner-docker:latest
+```
+
+**GitHub Attached Execution:**
+```bash
+docker run -d \
+  --name github-runner \
+  --group-add "${DOCKER_GID}" \
+  -e GITHUB_REPOSITORY="https://github.com/{owner}/{repo}" \
+  -e RUNNER_TOKEN="YOUR_RUNNER_TOKEN" \
+  -e RUNNER_NAME="ubuntu-runner" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  github-runner-docker:latest
+```
+
+#### Using Rootless Podman on Ubuntu
+```bash
+systemctl --user enable --now podman.socket
+
+podman run --rm -it \
+  -v "${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:z" \
+  github-runner-docker:latest
+```
+
+---
+
+### 2. Running on Fedora Silverblue (Rootless Podman)
+
+Fedora Silverblue uses immutable OSTree deployments with rootless Podman and SELinux enforcement by default.
+
+#### Enable Rootless Podman Socket
+Enable user lingering and start the rootless Podman API socket:
+```bash
+# Enable lingering to allow user services to start on boot
+loginctl enable-linger "${USER}"
+
+# Start user-level Podman API socket
+systemctl --user enable --now podman.socket
+```
+
+#### Interactive / Local Execution (without GitHub attachment)
+Mount the rootless Podman socket (`/run/user/1000/podman/podman.sock`) using the SELinux `:z` flag so the unprivileged `runner` user (UID 1001) can interact with host containers:
 ```bash
 podman run --rm -it \
   -v "${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:z" \
   github-runner-docker:latest
 ```
 
-> **Note on Podman Socket:**
-> Ensure the Podman socket service is enabled and active on your host system:
-> ```bash
-> systemctl --user enable --now podman.socket
-> ```
-
-### Running One-off Commands
-
-You can also execute individual commands directly inside the runner:
-
+#### GitHub Attached Execution (Background Service)
 ```bash
-# Check Docker CLI version connected to host Podman socket
+podman run -d \
+  --name github-runner-silverblue \
+  -e GITHUB_REPOSITORY="https://github.com/{owner}/{repo}" \
+  -e RUNNER_TOKEN="YOUR_RUNNER_TOKEN" \
+  -e RUNNER_NAME="silverblue-runner" \
+  -v "${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:z" \
+  github-runner-docker:latest
+```
+
+#### Running One-off Commands
+```bash
+# Execute docker CLI commands directly using host rootless Podman
 podman run --rm \
   -v "${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:z" \
-  github-runner-docker:latest docker version
+  github-runner-docker:latest docker ps
 ```
 
 ---
