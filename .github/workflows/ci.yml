@@ -151,6 +151,9 @@ jobs:
                 podman system service --time=0 unix:///tmp/podman.sock &
                 sleep 3
 
+                # Grant read/write permissions on the socket for container user (runner / UID 1001)
+                chmod 666 /tmp/podman.sock
+
                 podman load -i /artifacts/github-runner-docker.tar
                 echo \"Testing rootless container execution on Fedora Silverblue...\"
                 CONTAINER_ID=\$(podman run -d -v /tmp/podman.sock:/var/run/docker.sock:z github-runner-docker:test)
