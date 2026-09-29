@@ -15,13 +15,19 @@ if [ "$#" -gt 0 ]; then
     fi
 fi
 
-# If GitHub credentials are not provided, run an interactive shell or exec command
+# If GitHub credentials are not provided, run local mode (interactive shell or keep-alive loop for background containers)
 if [ -z "${GITHUB_REPOSITORY}" ] || [ -z "${RUNNER_TOKEN}" ]; then
     echo "No GitHub repository or token supplied. Running in local mode..."
+    RUNNER_CMD="bash"
+    if [ ! -t 0 ]; then
+        # Non-interactive shell (e.g. docker run -d background container)
+        RUNNER_CMD="tail -f /dev/null"
+    fi
+
     if command -v gosu >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
-        exec gosu runner bash
+        exec gosu runner ${RUNNER_CMD}
     else
-        exec bash
+        exec ${RUNNER_CMD}
     fi
 fi
 

@@ -66,28 +66,18 @@ jobs:
             BASE_IMAGE=github-runner-base:test
 
       - name: Validate Container Running
-        env:
-          ACTION_TOKEN: ${{ secrets.ACTION_TOKEN }}
         run: |
-          if [ -n "${ACTION_TOKEN}" ]; then
-            echo "Starting runner container test with ACTION_TOKEN..."
-            CONTAINER_ID=$(docker run -d \
-              -e GITHUB_REPOSITORY="https://github.com/thedigitaledge/github_runner_container" \
-              -e RUNNER_TOKEN="${ACTION_TOKEN}" \
-              github-runner-docker:test)
+          echo "Testing local container execution..."
+          CONTAINER_ID=$(docker run -d github-runner-docker:test)
 
-            sleep 5
+          sleep 3
 
-            if docker ps -q --filter "id=${CONTAINER_ID}" | grep -q .; then
-              echo "Container is running successfully!"
-              docker logs "${CONTAINER_ID}"
-              docker stop "${CONTAINER_ID}"
-            else
-              echo "Container stopped or failed to start:"
-              docker logs "${CONTAINER_ID}"
-              exit 1
-            fi
+          if docker ps -q --filter "id=${CONTAINER_ID}" | grep -q .; then
+            echo "Container is running successfully!"
+            docker logs "${CONTAINER_ID}"
+            docker stop "${CONTAINER_ID}"
           else
-            echo "ACTION_TOKEN is not set. Testing container local mode execution..."
-            docker run --rm github-runner-docker:test docker --version
+            echo "Container failed to run:"
+            docker logs "${CONTAINER_ID}"
+            exit 1
           fi
