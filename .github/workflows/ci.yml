@@ -73,6 +73,8 @@ jobs:
           cache-to: type=gha,mode=max,scope=docker
           build-args: |
             BASE_IMAGE=github-runner-base:test
+          build-contexts: |
+            github-runner-base:test=docker-image://github-runner-base:test
 
       - name: Save Extended Runner Image Artifact
         run: |
