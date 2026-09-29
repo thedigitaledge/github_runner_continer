@@ -138,12 +138,15 @@ jobs:
               echo "testuser:100000:65536" > /etc/subuid
               echo "testuser:100000:65536" > /etc/subgid
 
-              # Install Podman
-              dnf install -y podman
+              # Ensure setuid permissions on newuidmap/newgidmap
+              chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap 2>/dev/null || true
 
               # Execute rootless Podman test as non-root "testuser"
               su - testuser -c "
                 set -e
+                mkdir -p ~/.config/containers
+                echo -e \"[storage]\ndriver = \\\"vfs\\\"\" > ~/.config/containers/storage.conf
+
                 podman load -i /artifacts/github-runner-docker.tar
                 echo \"Testing rootless container execution on Fedora Silverblue...\"
                 CONTAINER_ID=\$(podman run -d github-runner-docker:test)
