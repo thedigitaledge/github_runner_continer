@@ -62,19 +62,12 @@ jobs:
           cache-to: type=gha,mode=max,scope=base
 
       - name: Build Extended Docker CLI Image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Containerfile.docker
-          load: true
-          push: false
-          tags: github-runner-docker:test
-          cache-from: type=gha,scope=docker
-          cache-to: type=gha,mode=max,scope=docker
-          build-args: |
-            BASE_IMAGE=github-runner-base:test
-          build-contexts: |
-            github-runner-base:test=docker-image://github-runner-base:test
+        run: |
+          docker build \
+            -f Containerfile.docker \
+            -t github-runner-docker:test \
+            --build-arg BASE_IMAGE=github-runner-base:test \
+            .
 
       - name: Save Extended Runner Image Artifact
         run: |
