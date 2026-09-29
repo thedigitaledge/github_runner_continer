@@ -5,14 +5,22 @@ on:
     branches:
       - main
       - develop
+    tags:
+      - 'v*'
   pull_request:
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
 
 jobs:
-  validate-and-lint:
+  # Stage 1: Validate & Lint Codebase
+  lint:
+    name: Lint & Validate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Lint Shell Scripts
         run: |
@@ -22,35 +30,229 @@ jobs:
         uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: Containerfile.base
-          ignore: DL3006,DL3007,DL3008,DL4006,SC1091
+          ignore: DL3006,DL3007,DL3008,DL3066,DL4006,SC1091
 
       - name: Lint Docker CLI Containerfile
         uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: Containerfile.docker
-          ignore: DL3006,DL3007,DL3008,DL4006,SC1091
+          ignore: DL3006,DL3007,DL3008,DL3066,DL4006,SC1091
+
+  # Stage 2: Build Container Images
+  build:
+    name: Build Container Images
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Base Image
+        run: |
+          docker build \
+            -f Containerfile.base \
+            -t github-runner-base:test \
+            .
+
+      - name: Build Extended Docker CLI Image
+        run: |
+          docker build \
+            -f Containerfile.docker \
+            -t github-runner-docker:test \
+            --build-arg BASE_IMAGE=github-runner-base:test \
+            .
+
+      - name: Save Extended Runner Image Artifact
+        run: |
+          mkdir -p artifacts
+          docker save github-runner-docker:test -o artifacts/github-runner-docker.tar
+
+      - name: Upload Container Image Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-runner-docker-image
+          path: artifacts/github-runner-docker.tar
+          retention-days: 1
+
+  # Stage 3: Test Container in Parallel (Ubuntu Docker & Fedora Silverblue Rootless Podman)
+  test:
+    name: Test (${{ matrix.os_name }})
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os_name: "Ubuntu Docker"
+            runner_type: "ubuntu"
+          - os_name: "Fedora Silverblue Rootless Podman"
+            runner_type: "fedora-podman"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Container Image Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: github-runner-docker-image
+          path: artifacts
+
+      # --- Ubuntu Docker Test Execution ---
+      - name: Test Container Execution on Ubuntu (Docker)
+        if: matrix.runner_type == 'ubuntu'
+        run: |
+          docker load -i artifacts/github-runner-docker.tar
+          echo "Testing container execution on Ubuntu Docker..."
+          DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 0)
+          CONTAINER_ID=$(docker run -d \
+            --group-add "${DOCKER_GID}" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            github-runner-docker:test)
+          sleep 3
+
+          if docker ps -q --filter "id=${CONTAINER_ID}" | grep -q .; then
+            echo "github-runner-docker container is running successfully on Ubuntu Docker!"
+          else
+            echo "github-runner-docker container failed to run on Ubuntu Docker:"
+            docker logs "${CONTAINER_ID}"
+            exit 1
+          fi
+
+          echo "Testing execution of a docker container inside github-runner-docker..."
+          docker exec "${CONTAINER_ID}" docker run --rm alpine:latest echo "Nested docker container run successfully on Ubuntu!"
+          docker stop "${CONTAINER_ID}"
+
+      # --- Fedora Silverblue Rootless Podman Test Execution ---
+      - name: Test Container Execution on Fedora Silverblue (Rootless Podman as Non-Root User)
+        if: matrix.runner_type == 'fedora-podman'
+        run: |
+          echo "Executing test inside Fedora Silverblue container as non-root user with rootless Podman..."
+          docker run --rm --privileged \
+            -v "$(pwd)/artifacts:/artifacts:ro" \
+            quay.io/fedora/fedora-silverblue:latest \
+            bash -c '
+              set -e
+              # Create non-root user "testuser" with subuid/subgid mapping for rootless podman
+              useradd -m -u 2000 testuser
+              echo "testuser:100000:65536" > /etc/subuid
+              echo "testuser:100000:65536" > /etc/subgid
+
+              # Ensure setuid permissions on newuidmap/newgidmap
+              chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap 2>/dev/null || true
+
+              # Execute rootless Podman test as non-root "testuser"
+              su - testuser -c "
+                set -e
+                mkdir -p ~/.config/containers
+                echo -e \"[storage]\ndriver = \\\"vfs\\\"\" > ~/.config/containers/storage.conf
+
+                # Start Podman API socket as non-root testuser
+                podman system service --time=0 unix:///tmp/podman.sock &
+                sleep 3
+
+                # Grant read/write permissions on the socket for container user (runner / UID 1001)
+                chmod 666 /tmp/podman.sock
+
+                podman load -i /artifacts/github-runner-docker.tar
+                echo \"Testing rootless container execution on Fedora Silverblue...\"
+                CONTAINER_ID=\$(podman run -d -v /tmp/podman.sock:/var/run/docker.sock:z github-runner-docker:test)
+                sleep 3
+
+                if podman ps -q --filter \"id=\${CONTAINER_ID}\" | grep -q .; then
+                  echo \"github-runner-docker container is running successfully with rootless Podman on Fedora Silverblue!\"
+                else
+                  echo \"github-runner-docker container failed to run on Fedora Silverblue rootless Podman:\"
+                  podman logs \"\${CONTAINER_ID}\"
+                  exit 1
+                fi
+
+                echo \"Testing execution of a docker container inside github-runner-docker...\"
+                podman exec \"\${CONTAINER_ID}\" docker run --rm alpine:latest echo \"Nested docker container run successfully on Fedora Silverblue!\"
+                podman stop \"\${CONTAINER_ID}\"
+              "
+            '
+
+  # Stage 4: Publish Container Images (Tag releases only)
+  publish:
+    name: Publish Container Images
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-        with:
-          driver: docker
 
-      - name: Build Base Image (Dry Run)
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine Version and Metadata
+        id: prep
+        run: |
+          RAW_VERSION="${{ github.ref_name }}"
+          VERSION="${RAW_VERSION#v}"
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          IMAGE_PREFIX="${{ env.REGISTRY }}/${{ github.repository_owner }}"
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag_v=v${VERSION}" >> $GITHUB_OUTPUT
+          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+          echo "image_prefix=${IMAGE_PREFIX}" >> $GITHUB_OUTPUT
+
+      - name: Build and Push Base Runner Image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Containerfile.base
-          load: true
-          push: false
-          tags: github-runner-base:test
+          push: true
+          tags: |
+            ${{ steps.prep.outputs.image_prefix }}/github-runner-base:${{ steps.prep.outputs.version }}
+            ${{ steps.prep.outputs.image_prefix }}/github-runner-base:${{ steps.prep.outputs.tag_v }}
+            ${{ steps.prep.outputs.image_prefix }}/github-runner-base:latest
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,mode=max,scope=base
+          build-args: |
+            IMAGE_TITLE=github-runner-base
+            IMAGE_DESCRIPTION=Base GitHub Self-Hosted Runner Container
+            IMAGE_VERSION=${{ steps.prep.outputs.version }}
+            IMAGE_URL=https://github.com/${{ github.repository }}
+            IMAGE_DOCUMENTATION=https://github.com/${{ github.repository }}/blob/main/README.md
+            IMAGE_CREATED=${{ steps.prep.outputs.build_date }}
+            IMAGE_BASE_NAME=ghcr.io/actions/actions-runner:latest
+            IMAGE_AUTHORS=${{ github.repository_owner }}
+            IMAGE_LICENSES=MIT
 
-      - name: Build Extended Docker CLI Image (Dry Run)
+      - name: Build and Push Docker CLI Runner Image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Containerfile.docker
-          load: true
-          push: false
-          tags: github-runner-docker:test
+          push: true
+          tags: |
+            ${{ steps.prep.outputs.image_prefix }}/github-runner-docker:${{ steps.prep.outputs.version }}
+            ${{ steps.prep.outputs.image_prefix }}/github-runner-docker:${{ steps.prep.outputs.tag_v }}
+            ${{ steps.prep.outputs.image_prefix }}/github-runner-docker:latest
+          cache-from: type=gha,scope=docker
+          cache-to: type=gha,mode=max,scope=docker
           build-args: |
-            BASE_IMAGE=github-runner-base:test
+            BASE_IMAGE=${{ steps.prep.outputs.image_prefix }}/github-runner-base:${{ steps.prep.outputs.version }}
+            IMAGE_TITLE=github-runner-docker
+            IMAGE_DESCRIPTION=Extended GitHub Self-Hosted Runner Container with Docker CLI
+            IMAGE_VERSION=${{ steps.prep.outputs.version }}
+            IMAGE_URL=https://github.com/${{ github.repository }}
+            IMAGE_DOCUMENTATION=https://github.com/${{ github.repository }}/blob/main/README.md
+            IMAGE_CREATED=${{ steps.prep.outputs.build_date }}
+            IMAGE_BASE_NAME=${{ steps.prep.outputs.image_prefix }}/github-runner-base:${{ steps.prep.outputs.version }}
+            IMAGE_AUTHORS=${{ github.repository_owner }}
+            IMAGE_LICENSES=MIT

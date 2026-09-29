@@ -51,6 +51,91 @@ docker build -f Dockerfile.docker -t github-runner-docker:latest .
 
 ---
 
+## Running the Container
+
+You can run the runner container on **Ubuntu** (using Docker or Podman) or **Fedora Silverblue** (using Rootless Podman).
+
+### 1. Running on Ubuntu
+
+#### Using Docker
+
+**Interactive / Local Execution (without GitHub attachment):**
+Pass the host Docker group GID so the non-root `runner` user inside the container inherits permissions to communicate with the Docker daemon:
+```bash
+DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 0)
+
+docker run --rm -it \
+  --group-add "${DOCKER_GID}" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  github-runner-docker:latest
+```
+
+**GitHub Attached Execution:**
+```bash
+docker run -d \
+  --name github-runner \
+  --group-add "${DOCKER_GID}" \
+  -e GITHUB_REPOSITORY="https://github.com/{owner}/{repo}" \
+  -e RUNNER_TOKEN="YOUR_RUNNER_TOKEN" \
+  -e RUNNER_NAME="ubuntu-runner" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  github-runner-docker:latest
+```
+
+#### Using Rootless Podman on Ubuntu
+```bash
+systemctl --user enable --now podman.socket
+
+podman run --rm -it \
+  -v "${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:z" \
+  github-runner-docker:latest
+```
+
+---
+
+### 2. Running on Fedora Silverblue (Rootless Podman)
+
+Fedora Silverblue uses immutable OSTree deployments with rootless Podman and SELinux enforcement by default.
+
+#### Enable Rootless Podman Socket
+Enable user lingering and start the rootless Podman API socket:
+```bash
+# Enable lingering to allow user services to start on boot
+loginctl enable-linger "${USER}"
+
+# Start user-level Podman API socket
+systemctl --user enable --now podman.socket
+```
+
+#### Interactive / Local Execution (without GitHub attachment)
+Mount the rootless Podman socket (`/run/user/1000/podman/podman.sock`) using the SELinux `:z` flag so the unprivileged `runner` user (UID 1001) can interact with host containers:
+```bash
+podman run --rm -it \
+  -v "${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:z" \
+  github-runner-docker:latest
+```
+
+#### GitHub Attached Execution (Background Service)
+```bash
+podman run -d \
+  --name github-runner-silverblue \
+  -e GITHUB_REPOSITORY="https://github.com/{owner}/{repo}" \
+  -e RUNNER_TOKEN="YOUR_RUNNER_TOKEN" \
+  -e RUNNER_NAME="silverblue-runner" \
+  -v "${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:z" \
+  github-runner-docker:latest
+```
+
+#### Running One-off Commands
+```bash
+# Execute docker CLI commands directly using host rootless Podman
+podman run --rm \
+  -v "${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:z" \
+  github-runner-docker:latest docker ps
+```
+
+---
+
 ## Quadlet Unit Deployment & Customization
 
 Podman Quadlet systemd service files allow rootless user-level execution of containers managed directly by `systemd`.
