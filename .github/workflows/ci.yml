@@ -115,18 +115,21 @@ jobs:
         if: matrix.runner_type == 'ubuntu'
         run: |
           docker load -i artifacts/github-runner-docker.tar
-          echo "Testing container local execution on Ubuntu Docker..."
-          CONTAINER_ID=$(docker run -d github-runner-docker:test)
+          echo "Testing container execution on Ubuntu Docker..."
+          CONTAINER_ID=$(docker run -d -v /var/run/docker.sock:/var/run/docker.sock github-runner-docker:test)
           sleep 3
+
           if docker ps -q --filter "id=${CONTAINER_ID}" | grep -q .; then
-            echo "Container is running successfully on Ubuntu Docker!"
-            docker logs "${CONTAINER_ID}"
-            docker stop "${CONTAINER_ID}"
+            echo "github-runner-docker container is running successfully on Ubuntu Docker!"
           else
-            echo "Container failed to run on Ubuntu Docker:"
+            echo "github-runner-docker container failed to run on Ubuntu Docker:"
             docker logs "${CONTAINER_ID}"
             exit 1
           fi
+
+          echo "Testing execution of a docker container inside github-runner-docker..."
+          docker exec "${CONTAINER_ID}" docker run --rm alpine:latest echo "Nested docker container run successfully on Ubuntu!"
+          docker stop "${CONTAINER_ID}"
 
       # --- Fedora Silverblue Rootless Podman Test Execution ---
       - name: Test Container Execution on Fedora Silverblue (Rootless Podman as Non-Root User)
@@ -152,19 +155,26 @@ jobs:
                 mkdir -p ~/.config/containers
                 echo -e \"[storage]\ndriver = \\\"vfs\\\"\" > ~/.config/containers/storage.conf
 
+                # Start Podman API socket as non-root testuser
+                podman system service --time=0 unix:///tmp/podman.sock &
+                sleep 3
+
                 podman load -i /artifacts/github-runner-docker.tar
                 echo \"Testing rootless container execution on Fedora Silverblue...\"
-                CONTAINER_ID=\$(podman run -d github-runner-docker:test)
+                CONTAINER_ID=\$(podman run -d -v /tmp/podman.sock:/var/run/docker.sock:z github-runner-docker:test)
                 sleep 3
+
                 if podman ps -q --filter \"id=\${CONTAINER_ID}\" | grep -q .; then
-                  echo \"Container is running successfully with rootless Podman on Fedora Silverblue!\"
-                  podman logs \"\${CONTAINER_ID}\"
-                  podman stop \"\${CONTAINER_ID}\"
+                  echo \"github-runner-docker container is running successfully with rootless Podman on Fedora Silverblue!\"
                 else
-                  echo \"Container failed to run on Fedora Silverblue rootless Podman:\"
+                  echo \"github-runner-docker container failed to run on Fedora Silverblue rootless Podman:\"
                   podman logs \"\${CONTAINER_ID}\"
                   exit 1
                 fi
+
+                echo \"Testing execution of a docker container inside github-runner-docker...\"
+                podman exec \"\${CONTAINER_ID}\" docker run --rm alpine:latest echo \"Nested docker container run successfully on Fedora Silverblue!\"
+                podman stop \"\${CONTAINER_ID}\"
               "
             '
 
