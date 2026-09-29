@@ -11,7 +11,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  validate-and-lint:
+  # Stage 1: Validate & Lint Codebase
+  lint:
+    name: Lint & Validate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -33,9 +35,11 @@ jobs:
           dockerfile: Containerfile.docker
           ignore: DL3006,DL3007,DL3008,DL3066,DL4006,SC1091
 
-  build-and-test:
+  # Stage 2: Build Container Images
+  build:
+    name: Build Container Images
     runs-on: ubuntu-latest
-    needs: validate-and-lint
+    needs: lint
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -65,19 +69,93 @@ jobs:
           build-args: |
             BASE_IMAGE=github-runner-base:test
 
-      - name: Validate Container Running
+      - name: Save Extended Runner Image Artifact
         run: |
-          echo "Testing local container execution..."
+          mkdir -p artifacts
+          docker save github-runner-docker:test -o artifacts/github-runner-docker.tar
+
+      - name: Upload Container Image Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-runner-docker-image
+          path: artifacts/github-runner-docker.tar
+          retention-days: 1
+
+  # Stage 3: Test Container in Parallel (Ubuntu Docker & Fedora Silverblue Rootless Podman)
+  test:
+    name: Test (${{ matrix.os_name }})
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os_name: "Ubuntu Docker"
+            runner_type: "ubuntu"
+          - os_name: "Fedora Silverblue Rootless Podman"
+            runner_type: "fedora-podman"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Container Image Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: github-runner-docker-image
+          path: artifacts
+
+      # --- Ubuntu Docker Test Execution ---
+      - name: Test Container Execution on Ubuntu (Docker)
+        if: matrix.runner_type == 'ubuntu'
+        run: |
+          docker load -i artifacts/github-runner-docker.tar
+          echo "Testing container local execution on Ubuntu Docker..."
           CONTAINER_ID=$(docker run -d github-runner-docker:test)
-
           sleep 3
-
           if docker ps -q --filter "id=${CONTAINER_ID}" | grep -q .; then
-            echo "Container is running successfully!"
+            echo "Container is running successfully on Ubuntu Docker!"
             docker logs "${CONTAINER_ID}"
             docker stop "${CONTAINER_ID}"
           else
-            echo "Container failed to run:"
+            echo "Container failed to run on Ubuntu Docker:"
             docker logs "${CONTAINER_ID}"
             exit 1
           fi
+
+      # --- Fedora Silverblue Rootless Podman Test Execution ---
+      - name: Test Container Execution on Fedora Silverblue (Rootless Podman as Non-Root User)
+        if: matrix.runner_type == 'fedora-podman'
+        run: |
+          echo "Executing test inside Fedora Silverblue container as non-root user with rootless Podman..."
+          docker run --rm --privileged \
+            -v "$(pwd)/artifacts:/artifacts:ro" \
+            quay.io/fedora/fedora-silverblue:latest \
+            bash -c '
+              set -e
+              # Create non-root user "testuser" with subuid/subgid mapping for rootless podman
+              useradd -m -u 2000 testuser
+              echo "testuser:100000:65536" > /etc/subuid
+              echo "testuser:100000:65536" > /etc/subgid
+
+              # Install Podman
+              dnf install -y podman
+
+              # Execute rootless Podman test as non-root "testuser"
+              su - testuser -c "
+                set -e
+                podman load -i /artifacts/github-runner-docker.tar
+                echo \"Testing rootless container execution on Fedora Silverblue...\"
+                CONTAINER_ID=\$(podman run -d github-runner-docker:test)
+                sleep 3
+                if podman ps -q --filter \"id=\${CONTAINER_ID}\" | grep -q .; then
+                  echo \"Container is running successfully with rootless Podman on Fedora Silverblue!\"
+                  podman logs \"\${CONTAINER_ID}\"
+                  podman stop \"\${CONTAINER_ID}\"
+                else
+                  echo \"Container failed to run on Fedora Silverblue rootless Podman:\"
+                  podman logs \"\${CONTAINER_ID}\"
+                  exit 1
+                fi
+              "
+            '
