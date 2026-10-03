@@ -68,7 +68,7 @@ jobs:
           docker save github-runner-docker:test -o artifacts/github-runner-docker.tar
 
       - name: Upload Container Image Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: github-runner-docker-image
           path: artifacts/github-runner-docker.tar
